@@ -14,6 +14,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev make zip zlib1g-dev libelf-dev
 
+    - name: 🧠 Set Up Ccache (Resume Ability)
+      uses: actions/cache@v3
+      with:
+        path: ~/.ccache
+        key: kernel-ccache-${{ github.sha }}
+        restore-keys: |
+          kernel-ccache-
+
     - name: 📥 Clone Ziti Kernel Source
       run: |
         git clone https://github.com/LineageOS/android_kernel_oneplus_sm8350.git -b lineage-21 source
@@ -26,17 +34,18 @@ jobs:
       run: |
         cd source
         
-        # Add the compiler binaries to the system PATH
+        # Configure Ccache memory limit to avoid RAM crashes
+        export CCACHE_DIR=~/.ccache
+        export CCACHE_EXEC=$(which ccache)
+        ccache -M 10G
+        
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
+        export MAKE_ARGS="O=out ARCH=arm64 CC=\"ccache clang\" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC=\"ccache gcc\" HOSTCXX=\"ccache g++\""
         
-        # Streamlined arguments for stable cross-compilation on Ubuntu 22.04
-        export MAKE_ARGS="O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC=gcc HOSTCXX=g++"
-        
-        # 1. Initialize the configuration using the LineageOS board setup
         make $MAKE_ARGS vendor/lahaina-qgki_defconfig
         
-        # 2. Build the compressed kernel image using all available server cores
-        make -j$(nproc --all) $MAKE_ARGS Image
+        # Reduced core count to prevent RAM overload (Exit Code 2)
+        make -j2 $MAKE_ARGS Image
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
