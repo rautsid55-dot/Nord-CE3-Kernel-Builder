@@ -22,9 +22,10 @@ jobs:
         restore-keys: |
           kernel-ccache-
 
-    - name: 📥 Clone Ziti Kernel Source
+    - name: 📥 Clone Ziti Kernel Source (Voltage OS Android 16)
       run: |
-        git clone https://github.com/LineageOS/android_kernel_oneplus_sm8350.git -b lineage-21 source
+        # Using the exact Amit-0i source and 16.2 branch for Android 16
+        git clone https://github.com/amit-0i/android_kernel_oneplus_sm8350.git -b 16.2 source
 
     - name: 📥 Pull Proton-Clang Toolchain
       run: |
@@ -44,13 +45,48 @@ jobs:
         # 1. Initialize configuration with pure LLVM and warning bypass
         make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" vendor/lahaina-qgki_defconfig
         
-        # 2. Build the kernel image, resuming from cache
+        # 2. Build the kernel image
         make -j2 O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
         git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
         cp source/out/arch/arm64/boot/Image AnyKernel3/ || echo "Image not found"
+        
+        # Auto-generate the correct anykernel.sh for OnePlus Nord CE3
+        cat << 'EOF' > AnyKernel3/anykernel.sh
+        properties() { '
+        kernel.string=Ziti Custom Kernel (Android 16)
+        do.devicecheck=1
+        do.modules=0
+        do.systemless=1
+        do.cleanup=1
+        do.cleanuponabort=0
+        device.name1=ziti
+        device.name2=CPH2569
+        device.name3=OP5953L1
+        device.name4=
+        device.name5=
+        supported.versions=
+        supported.patchlevels=
+        supported.vendorpatchlevels=
+        '; }
+        
+        boot_attributes() {
+        set_perm_recursive 0 0 755 644 $RAMDISK/*;
+        set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+        }
+        
+        BLOCK=boot;
+        IS_SLOT_DEVICE=1;
+        RAMDISK_COMPRESSION=auto;
+        PATCH_VBMETA_FLAG=auto;
+        
+        . tools/ak3-core.sh;
+        dump_boot;
+        write_boot;
+        EOF
+        
         cd AnyKernel3
         zip -r9 ../Ziti-Custom-Kernel-Flashable.zip *
 
