@@ -1,0 +1,54 @@
+name: Build Ziti Kernel (Flashable Zip)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compile & Package Kernel
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🛠️ Setup Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev make zip zlib1g-dev libelf-dev
+
+    - name: 📥 Clone Ziti Kernel Source
+      run: |
+        # Pulling the exact community tree for OnePlus Nord CE3 (SM7325)
+        git clone https://github.com/pjgowtham/android_kernel_oneplus_sm7325.git -b lineage-21 source
+
+    - name: 📥 Pull Proton-Clang Toolchain
+      run: |
+        # Using Proton-Clang for maximum performance and stability
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
+
+    - name: ⚙️ Compile the Kernel
+      run: |
+        cd source
+        export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
+        
+        # Initialize configuration
+        make O=out ARCH=arm64 CC=clang ziti_defconfig
+        
+        # Build the kernel image utilizing all server CPU cores
+        make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image
+
+    - name: 📦 Package into AnyKernel3 Zip
+      run: |
+        # Download AnyKernel3 template
+        git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
+        
+        # Move the compiled Image into the AnyKernel folder
+        cp source/out/arch/arm64/boot/Image AnyKernel3/
+        
+        # Zip it up into a flashable file
+        cd AnyKernel3
+        zip -r9 ../Ziti-Custom-Kernel-Flashable.zip *
+
+    - name: 📤 Upload Final Flashable Zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: Ziti-Custom-Kernel-Flashable
+        path: Ziti-Custom-Kernel-Flashable.zip
