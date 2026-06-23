@@ -30,7 +30,7 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
 
-    - name: ⚙️ Compile Kernel Image (Dual Config Only)
+    - name: ⚙️ Compile Kernel Image AND Modules
       run: |
         cd source
         
@@ -40,23 +40,27 @@ jobs:
         
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
         
-        # 1. Merge BOTH configurations naturally (No inline forcing)
+        # 1. Merge BOTH configurations (Base + OnePlus Specific)
         make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" vendor/lahaina-qgki_defconfig vendor/oplus_yupik_QGKI.config
         
-        # 2. Build ONLY the Image. It will use the ROM's pre-existing modules.
-        make -j2 O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image
+        # 2. Build the Image AND the corresponding Modules (.ko files)
+        make -j$(nproc) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image modules
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
         git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
         cp source/out/arch/arm64/boot/Image AnyKernel3/ || echo "Image not found"
         
-        # Auto-generate perfect anykernel.sh (Standard Boot Flasher)
+        # Create the module directory structure and inject all compiled .ko files
+        mkdir -p AnyKernel3/modules/vendor/lib/modules/
+        find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
+        
+        # Auto-generate perfect anykernel.sh (Systemless Module Injection Enabled)
         cat << 'EOF' > AnyKernel3/anykernel.sh
         properties() { '
-        kernel.string=Ziti Custom Kernel (Dual Config Base)
+        kernel.string=Ziti Custom Kernel (Dual Config + Modules)
         do.devicecheck=1
-        do.modules=0
+        do.modules=1
         do.systemless=1
         do.cleanup=1
         do.cleanuponabort=0
