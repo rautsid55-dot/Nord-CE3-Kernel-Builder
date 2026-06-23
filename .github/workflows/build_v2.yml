@@ -34,18 +34,18 @@ jobs:
       run: |
         cd source
         
-        # Configure Ccache memory limit to avoid RAM crashes
+        # Configure Ccache memory limit
         export CCACHE_DIR=~/.ccache
         export CCACHE_EXEC=$(which ccache)
         ccache -M 10G
         
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
-        export MAKE_ARGS="O=out ARCH=arm64 CC=\"ccache clang\" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC=\"ccache gcc\" HOSTCXX=\"ccache g++\""
         
-        make $MAKE_ARGS vendor/lahaina-qgki_defconfig
+        # 1. Initialize the configuration directly without nested string variables
+        make O=out ARCH=arm64 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" vendor/lahaina-qgki_defconfig
         
-        # Reduced core count to prevent RAM overload (Exit Code 2)
-        make -j2 $MAKE_ARGS Image
+        # 2. Build the compressed kernel image safely resuming from cache
+        make -j2 O=out ARCH=arm64 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" Image
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
