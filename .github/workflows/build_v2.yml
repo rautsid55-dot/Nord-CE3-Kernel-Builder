@@ -25,14 +25,18 @@ jobs:
     - name: ⚙️ Compile the Kernel
       run: |
         cd source
+        
+        # Add the compiler binaries to the system PATH
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
         
-        export MAKE_ARGS="O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip"
+        # Streamlined arguments for stable cross-compilation
+        export MAKE_ARGS="O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC=gcc HOSTCXX=g++"
         
-        # Using the native host compiler for basic scripts to avoid library clashes
-        make $MAKE_ARGS HOSTCC=gcc HOSTCXX=g++ vendor/lahaina-qgki_defconfig
+        # 1. Initialize the configuration
+        make $MAKE_ARGS vendor/lahaina-qgki_defconfig
         
-        make -j$(nproc --all) $MAKE_ARGS HOSTCC=gcc HOSTCXX=g++ Image
+        # 2. Build the compressed kernel image
+        make -j$(nproc --all) $MAKE_ARGS Image
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
