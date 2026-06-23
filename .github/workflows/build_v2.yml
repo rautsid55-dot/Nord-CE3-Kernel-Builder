@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     name: Compile & Package Kernel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     
     steps:
     - name: 🛠️ Setup Build Environment
@@ -27,14 +27,12 @@ jobs:
         cd source
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
         
-        # Define strict LLVM compiler arguments to prevent GNU clashes (Exit Code 2)
         export MAKE_ARGS="O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip"
         
-        # Initialize configuration
-        make $MAKE_ARGS vendor/lahaina-qgki_defconfig
+        # Using the native host compiler for basic scripts to avoid library clashes
+        make $MAKE_ARGS HOSTCC=gcc HOSTCXX=g++ vendor/lahaina-qgki_defconfig
         
-        # Build the kernel image utilizing all server CPU cores
-        make -j$(nproc --all) $MAKE_ARGS Image
+        make -j$(nproc --all) $MAKE_ARGS HOSTCC=gcc HOSTCXX=g++ Image
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
