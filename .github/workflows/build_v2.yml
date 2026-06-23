@@ -16,7 +16,6 @@ jobs:
 
     - name: 📥 Clone Ziti Kernel Source
       run: |
-        # Pulling the correct verified SM8350 common tree used for Ziti
         git clone https://github.com/LineageOS/android_kernel_oneplus_sm8350.git -b lineage-21 source
 
     - name: 📥 Pull Proton-Clang Toolchain
@@ -28,10 +27,14 @@ jobs:
         cd source
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
         
-        # We will attempt to build using the common vendor defconfig
-        make O=out ARCH=arm64 CC=clang vendor/lahaina-qgki_defconfig
+        # Define strict LLVM compiler arguments to prevent GNU clashes (Exit Code 2)
+        export MAKE_ARGS="O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip"
         
-        make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image
+        # Initialize configuration
+        make $MAKE_ARGS vendor/lahaina-qgki_defconfig
+        
+        # Build the kernel image utilizing all server CPU cores
+        make -j$(nproc --all) $MAKE_ARGS Image
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
