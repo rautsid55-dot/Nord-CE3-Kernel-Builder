@@ -30,7 +30,7 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
 
-    - name: ⚙️ Compile Kernel Image & Modules
+    - name: ⚙️ Compile Kernel Image (Dual Config + Inline)
       run: |
         cd source
         
@@ -40,27 +40,27 @@ jobs:
         
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
         
-        # 1. Initialize configuration safely without variable shortcuts
-        make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" vendor/lahaina-qgki_defconfig
+        # 1. Merge BOTH configurations (Base + OnePlus Specific)
+        make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" vendor/lahaina-qgki_defconfig vendor/oplus_yupik_QGKI.config
         
-        # 2. Build BOTH the Image and the crucial hardware modules safely
-        make -j2 O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image modules
+        # 2. Force all =m (modules) to =y (inline) so we don't need root
+        sed -i 's/=m/=y/g' out/.config
+        make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" olddefconfig
+        
+        # 3. Build only the Image; complete drivers are now baked natively inside
+        make -j2 O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image
 
     - name: 📦 Package into AnyKernel3 Zip
       run: |
         git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
         cp source/out/arch/arm64/boot/Image AnyKernel3/ || echo "Image not found"
         
-        # Create module path and securely copy all compiled .ko files
-        mkdir -p AnyKernel3/modules/vendor/lib/modules
-        find source/out -type f -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
-        
-        # Auto-generate perfect anykernel.sh with modules enabled
+        # Auto-generate perfect anykernel.sh (Modules disabled because they are inline)
         cat << 'EOF' > AnyKernel3/anykernel.sh
         properties() { '
-        kernel.string=Ziti Custom Kernel (Android 16 + Modules)
+        kernel.string=Ziti Custom Kernel (Dual Config + Inline)
         do.devicecheck=1
-        do.modules=1
+        do.modules=0
         do.systemless=1
         do.cleanup=1
         do.cleanuponabort=0
