@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     name: Compile & Package Kernel
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     
     steps:
     - name: 🛠️ Setup Build Environment
@@ -29,13 +29,13 @@ jobs:
         # Add the compiler binaries to the system PATH
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
         
-        # Streamlined arguments for stable cross-compilation
+        # Streamlined arguments for stable cross-compilation on Ubuntu 22.04
         export MAKE_ARGS="O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC=gcc HOSTCXX=g++"
         
-        # 1. Initialize the configuration
+        # 1. Initialize the configuration using the LineageOS board setup
         make $MAKE_ARGS vendor/lahaina-qgki_defconfig
         
-        # 2. Build the compressed kernel image
+        # 2. Build the compressed kernel image using all available server cores
         make -j$(nproc --all) $MAKE_ARGS Image
 
     - name: 📦 Package into AnyKernel3 Zip
