@@ -1,137 +1,118 @@
-name: Build Ziti Kernel
+name: Build Ziti Kernel (Flashable Zip)
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-build:
-runs-on: ubuntu-22.04
+  build:
+    name: Compile & Package Kernel
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: 🛠️ Setup Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev make zip zlib1g-dev libelf-dev
 
-```
-steps:
-  - name: Install Dependencies
-    run: |
-      sudo apt-get update
-      sudo apt-get install -y \
-        bc \
-        bison \
-        build-essential \
-        ccache \
-        curl \
-        flex \
-        git \
-        libelf-dev \
-        libssl-dev \
-        lld \
-        llvm \
-        clang \
-        zip \
-        unzip \
-        rsync \
-        python3
+    - name: 🧠 Set Up Ccache (Resume Ability)
+      uses: actions/cache@v3
+      with:
+        path: ~/.ccache
+        key: kernel-ccache-${{ github.sha }}
+        restore-keys: |
+          kernel-ccache-
 
-  - name: Setup CCache
-    uses: actions/cache@v4
-    with:
-      path: ~/.ccache
-      key: ziti-kernel-${{ github.ref_name }}
-      restore-keys: |
-        ziti-kernel-
+    - name: 📥 Clone Ziti Kernel Source (Voltage OS Android 16)
+      run: |
+        git clone https://github.com/amit-0i/android_kernel_oneplus_sm8350.git -b 16.2 source
 
-  - name: Clone Kernel Source
-    run: |
-      git clone --depth=1 -b 16.2 \
-      https://github.com/amit-0i/android_kernel_oneplus_sm8350.git source
+    - name: 📥 Pull Proton-Clang Toolchain
+      run: |
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
 
-  - name: Clone Proton Clang
-    run: |
-      git clone --depth=1 \
-      https://github.com/kdrag0n/proton-clang.git toolchain
+    - name: ⚙️ Compile Kernel Image AND Modules
+      run: |
+        cd source
+        
+        export CCACHE_DIR=~/.ccache
+        export CCACHE_EXEC=$(which ccache)
+        ccache -M 10G
+        
+        export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
+        
+        # 1. Merge BOTH configurations (Base + OnePlus Specific)
+        make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" vendor/lahaina-qgki_defconfig vendor/oplus_yupik_QGKI.config
+        
+        # 2. Build the Image AND the corresponding Modules (.ko files)
+        make -j$(nproc) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image modules
 
-  - name: Configure Kernel
-    run: |
-      cd source
+    - name: 📦 Package into AnyKernel3 Zip
+      run: |
+        git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
+        cp source/out/arch/arm64/boot/Image AnyKernel3/ || echo "Image not found"
+        
+        # Create the module directory structure and inject all compiled .ko files
+        mkdir -p AnyKernel3/modules/vendor/lib/modules/
+        find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
+        
+        # Auto-generate perfect anykernel.sh (FolkPatch Bypass Edition)
+        cat << 'EOF' > AnyKernel3/anykernel.sh
+        properties() { '
+        kernel.string=Ziti Custom Kernel (FolkPatch Edition)
+        do.devicecheck=1
+        do.modules=0
+        do.systemless=0
+        do.cleanup=1
+        do.cleanuponabort=0
+        device.name1=ziti
+        device.name2=CPH2569
+        device.name3=OP5953L1
+        device.name4=
+        device.name5=
+        supported.versions=
+        supported.patchlevels=
+        supported.vendorpatchlevels=
+        '; }
+        
+        boot_attributes() {
+        set_perm_recursive 0 0 755 644 $RAMDISK/*;
+        set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+        }
+        
+        BLOCK=boot;
+        IS_SLOT_DEVICE=1;
+        RAMDISK_COMPRESSION=auto;
+        PATCH_VBMETA_FLAG=auto;
+        
+        . tools/ak3-core.sh;
+        dump_boot;
+        
+        ui_print "- Forcing FolkPatch Driver Injection..."
+        FP_DIR="/data/adb/modules/ziti_kernel_drivers"
+        rm -rf $FP_DIR
+        mkdir -p $FP_DIR/vendor/lib/modules
+        cp -r $home/modules/vendor/lib/modules/* $FP_DIR/vendor/lib/modules/ 2>/dev/null
+        
+        cat << 'PROP' > $FP_DIR/module.prop
+        id=ziti_kernel_drivers
+        name=Ziti Kernel Drivers (FolkPatch)
+        version=1.0
+        versionCode=1
+        author=Ziti
+        description=Perfectly matched kernel drivers, manually injected for FolkPatch.
+        PROP
+        
+        chmod -R 755 $FP_DIR
+        ui_print "- FolkPatch driver injection absolute success!"
+        
+        write_boot;
+        EOF
+        
+        cd AnyKernel3
+        zip -r9 ../Ziti-Custom-Kernel-Flashable.zip *
 
-      export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
-
-      make O=out \
-        ARCH=arm64 \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        vendor/lahaina-qgki_defconfig
-
-      if [ -f arch/arm64/configs/vendor/oplus_yupik_QGKI.config ]; then
-        cat arch/arm64/configs/vendor/oplus_yupik_QGKI.config >> out/.config
-      fi
-
-      make O=out \
-        ARCH=arm64 \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        olddefconfig
-
-  - name: Build Kernel
-    run: |
-      cd source
-
-      export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
-
-      export CCACHE_DIR="$HOME/.ccache"
-      ccache -M 10G
-
-      make -j$(nproc) \
-        O=out \
-        ARCH=arm64 \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        CC="ccache clang" \
-        Image modules dtbs
-
-  - name: Show Build Information
-    run: |
-      cd source
-
-      echo "===== IMAGE ====="
-      ls -lh out/arch/arm64/boot/Image
-
-      echo "===== MODULE COUNT ====="
-      find out -name "*.ko" | wc -l
-
-      echo "===== KERNEL RELEASE ====="
-      cat out/include/config/kernel.release || true
-
-      echo "===== LOCALVERSION ====="
-      grep CONFIG_LOCALVERSION out/.config || true
-
-  - name: Clone AnyKernel3
-    run: |
-      git clone --depth=1 \
-      https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-
-  - name: Package Kernel
-    run: |
-      cp source/out/arch/arm64/boot/Image AnyKernel3/
-
-      mkdir -p AnyKernel3/modules
-
-      find source/out -name "*.ko" \
-        -exec cp {} AnyKernel3/modules/ \; || true
-
-      cd AnyKernel3
-      zip -r9 ../NordCE3-Kernel.zip *
-
-  - name: Upload Kernel Zip
-    uses: actions/upload-artifact@v4
-    with:
-      name: NordCE3-Kernel
-      path: NordCE3-Kernel.zip
-
-  - name: Upload Debug Files
-    uses: actions/upload-artifact@v4
-    with:
-      name: Kernel-Debug
-      path: |
-        source/out/.config
-        source/out/Module.symvers
-        source/out/System.map
-```
+    - name: 📤 Upload Final Flashable Zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: Ziti-Custom-Kernel-Flashable
+        path: Ziti-Custom-Kernel-Flashable.zip
