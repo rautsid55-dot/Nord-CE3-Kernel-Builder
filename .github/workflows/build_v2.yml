@@ -1,10 +1,20 @@
-steps:
+name: Build Ziti Kernel (The Perfect Build)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compile & Package Kernel
+    runs-on: ubuntu-22.04
+    
+    steps:
     - name: 🛠️ Setup Build Environment
       run: |
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev make zip zlib1g-dev libelf-dev
 
-    - name: 🧹 Free Up Disk Space (The Fix!)
+    - name: 🧹 Free Up Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
         tool-cache: false
@@ -15,10 +25,75 @@ steps:
         docker-images: true
         swap-storage: true
 
-    - name: 🧠 Set Up Ccache (Resume Ability)
+    - name: 🧠 Set Up Ccache
       uses: actions/cache@v3
       with:
         path: ~/.ccache
         key: kernel-ccache-${{ github.sha }}
         restore-keys: |
           kernel-ccache-
+
+    - name: 📥 Clone LineageOS Kernel Source
+      run: |
+        git clone https://github.com/pjgowtham/android_kernel_oneplus_sm8350.git -b lineage-23.2 source
+
+    - name: 📥 Pull Proton-Clang Toolchain
+      run: |
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
+
+    - name: ⚙️ Compile Kernel Image AND Modules
+      run: |
+        cd source
+        export CCACHE_DIR=~/.ccache
+        export CCACHE_EXEC=$(which ccache)
+        ccache -M 10G
+        export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
+        
+        # Assassinates the OnePlus duplicate symbol bug
+        find drivers/power/oplus/v1/gauge_ic/oplus_optiga/ -type f -exec sed -i 's/\bsha256\b/oplus_optiga_sha256/g' {} +
+        
+        # Compile
+        make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" vendor/lahaina-qgki_defconfig vendor/oplus_yupik_QGKI.config
+        make -j$(nproc) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image modules
+
+    - name: 📦 Package into AnyKernel3 Zip
+      run: |
+        git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
+        cp source/out/arch/arm64/boot/Image AnyKernel3/
+        # Copy DTBs if they exist
+        cp source/out/arch/arm64/boot/dtb.img AnyKernel3/ || true
+        
+        mkdir -p AnyKernel3/modules/vendor/lib/modules/
+        find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
+        
+        cat << 'EOF' > AnyKernel3/anykernel.sh
+        properties() { '
+        kernel.string=Ziti Custom Kernel (The Perfect Build)
+        do.devicecheck=1
+        do.modules=1
+        do.systemless=0
+        do.cleanup=1
+        do.cleanuponabort=0
+        device.name1=ziti
+        device.name2=CPH2569
+        device.name3=OP5953L1
+        '; }
+        
+        BLOCK=boot;
+        IS_SLOT_DEVICE=1;
+        RAMDISK_COMPRESSION=auto;
+        PATCH_VBMETA_FLAG=auto;
+        
+        . tools/ak3-core.sh;
+        dump_boot;
+        write_boot;
+        EOF
+        
+        cd AnyKernel3
+        zip -r9 ../Ziti-Custom-Kernel-Flashable.zip *
+
+    - name: 📤 Upload Final Flashable Zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: Ziti-Custom-Kernel-Flashable
+        path: Ziti-Custom-Kernel-Flashable.zip
