@@ -38,6 +38,9 @@ jobs:
         ccache -M 10G
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
         
+        # 0. ASSASSINATE THE ONEPLUS DUPLICATE SYMBOL BUG
+        find drivers/power/oplus/v1/gauge_ic/oplus_optiga/ -type f -exec sed -i 's/\bsha256\b/oplus_optiga_sha256/g' {} +
+        
         # 1. Merge BOTH configurations (Base + OnePlus Specific)
         make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" vendor/lahaina-qgki_defconfig vendor/oplus_yupik_QGKI.config
         
@@ -49,11 +52,9 @@ jobs:
         git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
         cp source/out/arch/arm64/boot/Image AnyKernel3/ || echo "Image not found"
         
-        # Create the module directory structure and inject all compiled .ko files
         mkdir -p AnyKernel3/modules/vendor/lib/modules/
         find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
         
-        # Auto-generate perfect anykernel.sh for FolkPatch
         cat << 'EOF' > AnyKernel3/anykernel.sh
         properties() { '
         kernel.string=Ziti Custom Kernel (LineageOS Source)
