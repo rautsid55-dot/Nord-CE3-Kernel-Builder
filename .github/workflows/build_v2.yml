@@ -1,4 +1,4 @@
-name: Build Ziti Kernel (LineageOS Source)
+name: Build Ziti Kernel (The Perfect Build)
 
 on:
   workflow_dispatch:
@@ -47,19 +47,21 @@ jobs:
         # 2. Build the Image AND the corresponding Modules (.ko files)
         make -j$(nproc) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- HOSTCC="ccache gcc" HOSTCXX="ccache g++" KCFLAGS="-Wno-error" Image modules
 
-    - name: 📦 Package into AnyKernel3 Zip (FolkPatch Edition)
+    - name: 📦 Package into AnyKernel3 Zip (Ramdisk Injection)
       run: |
         git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
         cp source/out/arch/arm64/boot/Image AnyKernel3/ || echo "Image not found"
         
+        # Create the AnyKernel module structure
         mkdir -p AnyKernel3/modules/vendor/lib/modules/
         find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
         
+        # Auto-generate perfect anykernel.sh for Direct Ramdisk Injection
         cat << 'EOF' > AnyKernel3/anykernel.sh
         properties() { '
-        kernel.string=Ziti Custom Kernel (LineageOS Source)
+        kernel.string=Ziti Custom Kernel (The Perfect Build)
         do.devicecheck=1
-        do.modules=0
+        do.modules=1
         do.systemless=0
         do.cleanup=1
         do.cleanuponabort=0
@@ -80,25 +82,6 @@ jobs:
         
         . tools/ak3-core.sh;
         dump_boot;
-        
-        ui_print "- Forcing FolkPatch Driver Injection..."
-        FP_DIR="/data/adb/modules/ziti_kernel_drivers"
-        rm -rf $FP_DIR
-        mkdir -p $FP_DIR/vendor/lib/modules
-        cp -r $home/modules/vendor/lib/modules/* $FP_DIR/vendor/lib/modules/ 2>/dev/null
-        
-        cat << 'PROP' > $FP_DIR/module.prop
-        id=ziti_kernel_drivers
-        name=Ziti Kernel Drivers (FolkPatch)
-        version=2.0
-        versionCode=2
-        author=Ziti
-        description=Perfectly matched LineageOS kernel drivers, manually injected for FolkPatch.
-        PROP
-        
-        chmod -R 755 $FP_DIR
-        ui_print "- FolkPatch driver injection absolute success!"
-        
         write_boot;
         EOF
         
