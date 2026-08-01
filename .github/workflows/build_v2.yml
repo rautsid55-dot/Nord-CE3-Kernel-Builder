@@ -1,4 +1,4 @@
-name: Nord CE3 Kernel Builder v901
+name: Nord CE3 Kernel Builder
 
 on:
   workflow_dispatch:
@@ -8,21 +8,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Setup
+    - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc bison build-essential ccache curl flex git libssl-dev make zip
-
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
-      with:
-        tool-cache: false
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap-storage: true
+        sudo apt install -y bc bison build-essential ccache flex git libssl-dev make zip
 
     - name: Setup Ccache
       uses: actions/cache@v3
@@ -31,7 +20,7 @@ jobs:
         key: ccache-${{ github.sha }}
         restore-keys: ccache-
 
-    - name: Clone Source
+    - name: Clone Kernel Source
       run: |
         git clone https://github.com/OnePlusOSS/android_kernel_oneplus_sm7325.git -b oneplus/sm7325_v_15.0.0_nord_ce3 source --depth=1
 
@@ -54,16 +43,15 @@ PYEOF
         echo '#!/bin/sh' > scripts/atomic/check-atomics.sh
         echo 'exit 0' >> scripts/atomic/check-atomics.sh
         
-        sed -i 's/¦/ /g' include/linux/memcontrol.h 2>/dev/null
+        sed -i 's/¦/ /g' include/linux/memcontrol.h 2>/dev/null || true
+        sed -i 's/sched_energy_present/sched_energy_enabled/g' kernel/sched/fair.c 2>/dev/null || true
         
-        sed -i 's/sched_energy_present/sched_energy_enabled/g' kernel/sched/fair.c 2>/dev/null
-        
-        sed -i '1s/^/#define trace_android_vh_check_dhcp_pkt(sk, skb, dev, pt, do_drop) do {} while(0)\n/' net/packet/af_packet.c 2>/dev/null
+        echo '#define trace_android_vh_check_dhcp_pkt(sk, skb, dev, pt, do_drop) do {} while(0)' | cat - net/packet/af_packet.c > /tmp/af_packet.c && mv /tmp/af_packet.c net/packet/af_packet.c
         
         for d in kernel/uad kernel/sched_assist kernel/tuning kernel/special_opt arch/arm64/kernel/secureguard block/healthinfo mm/healthinfo mm/zram_opt mm/process_reclaim; do
-          rm -rf "$d" 2>/dev/null
+          rm -rf "$d" 2>/dev/null || true
           mkdir -p "$d"
-          touch "$d/Kconfig" 2>/dev/null
+          touch "$d/Kconfig"
         done
         
         for d in mm/mm_osvelte mm/zram_opt mm/process_reclaim mm/malloc_track mm/task_mem mm/proactive_compact mm/multi_freearea mm/mapped_protect mm/kshrink_lruvecd mm/kshrink_slabd drivers/power/oplus drivers/soc/oplus; do
@@ -72,17 +60,14 @@ PYEOF
           touch "$d/dummy.c"
         done
         
-        sed -i 's/^obj-.*oplus_modules/# &/' net/Makefile 2>/dev/null
-        
-        echo "Fixes done"
+        sed -i 's/^obj-.*oplus_modules/# &/' net/Makefile 2>/dev/null || true
 
-    - name: Build
+    - name: Build Kernel
       run: |
         cd source
         export CCACHE_DIR=~/.ccache
         ccache -M 10G
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
-        
         export ARCH=arm64
         export CLANG_TRIPLE=aarch64-linux-gnu-
         export CROSS_COMPILE=aarch64-linux-gnu-
@@ -97,7 +82,7 @@ CONFIG_RTC_CLASS=y
 CONFIG_VDSO=y
 CONFIG_GENERIC_GETTIMEOFDAY=y
 CONFIG_HZ=250
-CONFIG_LOCALVERSION="-nordce3-custom"
+CONFIG_LOCALVERSION="-nordce3"
 EOF
         
         make O=out ARCH=arm64 olddefconfig
@@ -115,7 +100,7 @@ EOF
           KCFLAGS="-Wno-error -Wno-implicit-function-declaration" \
           Image modules dtbs 2>&1 | tee build.log || true
 
-    - name: Package
+    - name: Package AnyKernel3
       run: |
         if [ -f source/out/arch/arm64/boot/Image ]; then
           git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
@@ -123,11 +108,11 @@ EOF
           cp source/out/arch/arm64/boot/Image.gz AnyKernel3/ 2>/dev/null || true
           
           mkdir -p AnyKernel3/modules/vendor/lib/modules/
-          find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null
+          find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
           
           cat << 'EOF' > AnyKernel3/anykernel.sh
 properties() { '
-kernel.string=NordCE3-Lahaina-Kernel
+kernel.string=NordCE3-Kernel
 do.devicecheck=1
 do.modules=1
 do.systemless=0
@@ -153,12 +138,11 @@ EOF
 
     - name: Upload Kernel
       uses: actions/upload-artifact@v4
-      if: always()
       with:
         name: NordCE3-Kernel
         path: NordCE3-Kernel.zip
 
-    - name: Upload Log
+    - name: Upload Build Log
       uses: actions/upload-artifact@v4
       if: always()
       with:
