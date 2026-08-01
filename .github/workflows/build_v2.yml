@@ -43,7 +43,6 @@ jobs:
       run: |
         cd source
         
-        # atomic64_t fix
         python3 << 'PYEOF'
 with open('include/linux/types.h','r') as f: c=f.read()
 old='#ifdef CONFIG_64BIT\ntypedef struct {\n        s64 counter;\n} atomic64_t;\n#endif'
@@ -52,34 +51,27 @@ if old in c: open('include/linux/types.h','w').write(c.replace(old,new))
 print("types.h done")
 PYEOF
 
-        # check-atomics
         echo '#!/bin/sh' > scripts/atomic/check-atomics.sh
         echo 'exit 0' >> scripts/atomic/check-atomics.sh
         
-        # corrupted char
         sed -i 's/¦/ /g' include/linux/memcontrol.h 2>/dev/null
         
-        # sched_energy
         sed -i 's/sched_energy_present/sched_energy_enabled/g' kernel/sched/fair.c 2>/dev/null
         
-        # vendor hook
         sed -i '1s/^/#define trace_android_vh_check_dhcp_pkt(sk, skb, dev, pt, do_drop) do {} while(0)\n/' net/packet/af_packet.c 2>/dev/null
         
-        # Fix symlinks - copy vendor dirs
         for d in kernel/uad kernel/sched_assist kernel/tuning kernel/special_opt arch/arm64/kernel/secureguard block/healthinfo mm/healthinfo mm/zram_opt mm/process_reclaim; do
           rm -rf "$d" 2>/dev/null
           mkdir -p "$d"
           touch "$d/Kconfig" 2>/dev/null
         done
         
-        # Missing Makefiles
-        for d in mm/mm_osvelte mm/zram_opt mm/process_reclaim mm/malloc_track mm/task_mem mm/proactive_compact mm/multi_freearea mm/mapped_protect mm/kshrink_lruvecd mm/kshrink_slabd; do
+        for d in mm/mm_osvelte mm/zram_opt mm/process_reclaim mm/malloc_track mm/task_mem mm/proactive_compact mm/multi_freearea mm/mapped_protect mm/kshrink_lruvecd mm/kshrink_slabd drivers/power/oplus drivers/soc/oplus; do
           mkdir -p "$d"
           echo 'obj-y := dummy.o' > "$d/Makefile"
           touch "$d/dummy.c"
         done
         
-        # Fix net/oplus_modules
         sed -i 's/^obj-.*oplus_modules/# &/' net/Makefile 2>/dev/null
         
         echo "Fixes done"
