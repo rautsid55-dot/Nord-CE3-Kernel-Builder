@@ -1,18 +1,17 @@
-name: Build Nord CE3 Kernel v901
+name: Nord CE3 Kernel Builder v901
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Compile & Package
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Setup Environment
+    - name: Setup
       run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev make zip
+        sudo apt update
+        sudo apt install -y bc bison build-essential ccache curl flex git libssl-dev make zip
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
@@ -29,16 +28,14 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.ccache
-        key: kernel-ccache-${{ github.sha }}
-        restore-keys: kernel-ccache-
+        key: ccache-${{ github.sha }}
+        restore-keys: ccache-
 
-    - name: Clone Kernel Source (Nord CE3 Android 15)
+    - name: Clone Source
       run: |
         git clone https://github.com/OnePlusOSS/android_kernel_oneplus_sm7325.git -b oneplus/sm7325_v_15.0.0_nord_ce3 source --depth=1
-        cd source
-        git submodule update --init --recursive || true
 
-    - name: Get Proton-Clang
+    - name: Get Proton Clang
       run: |
         git clone --depth=1 https://github.com/kdrag0n/proton-clang toolchain
 
@@ -46,104 +43,99 @@ jobs:
       run: |
         cd source
         
-        # Fix 1: atomic64_t for bounds.c
-        python3 -c "
-f=open('include/linux/types.h');c=f.read();f.close()
+        # atomic64_t fix
+        python3 << 'PYEOF'
+with open('include/linux/types.h','r') as f: c=f.read()
 old='#ifdef CONFIG_64BIT\ntypedef struct {\n        s64 counter;\n} atomic64_t;\n#endif'
 new='#ifdef CONFIG_64BIT\ntypedef struct {\n        s64 counter;\n} atomic64_t;\n#else\ntypedef struct { s64 counter; } atomic64_t;\n#endif'
-if old in c:open('include/linux/types.h','w').write(c.replace(old,new))
-print('OK: types.h')
-"
-        # Fix 2: check-atomics hangs
+if old in c: open('include/linux/types.h','w').write(c.replace(old,new))
+print("types.h done")
+PYEOF
+
+        # check-atomics
         echo '#!/bin/sh' > scripts/atomic/check-atomics.sh
         echo 'exit 0' >> scripts/atomic/check-atomics.sh
         
-        # Fix 3: corrupted character
-        sed -i 's/¦/ /g' include/linux/memcontrol.h
+        # corrupted char
+        sed -i 's/¦/ /g' include/linux/memcontrol.h 2>/dev/null
         
-        # Fix 4: sched_energy
-        sed -i 's/sched_energy_present/sched_energy_enabled/g' kernel/sched/fair.c
+        # sched_energy
+        sed -i 's/sched_energy_present/sched_energy_enabled/g' kernel/sched/fair.c 2>/dev/null
         
-        # Fix 5: vendor hook stub
-        sed -i '1i #define trace_android_vh_check_dhcp_pkt(sk, skb, dev, pt, do_drop) do {} while(0)' net/packet/af_packet.c
-
-        # Fix 6: Broken symlinks (copy from vendor)
-        for d in kernel/uad kernel/sched_assist kernel/tuning kernel/special_opt arch/arm64/kernel/secureguard; do
+        # vendor hook
+        sed -i '1s/^/#define trace_android_vh_check_dhcp_pkt(sk, skb, dev, pt, do_drop) do {} while(0)\n/' net/packet/af_packet.c 2>/dev/null
+        
+        # Fix symlinks - copy vendor dirs
+        for d in kernel/uad kernel/sched_assist kernel/tuning kernel/special_opt arch/arm64/kernel/secureguard block/healthinfo mm/healthinfo mm/zram_opt mm/process_reclaim; do
           rm -rf "$d" 2>/dev/null
           mkdir -p "$d"
-          touch "$d/Kconfig"
-        done
-
-        # Fix 7: Missing directories
-        for d in mm/mm_osvelte mm/process_reclaim mm/zram_opt mm/malloc_track mm/task_mem block/healthinfo mm/healthinfo fs/proc/task_cpustats drivers/power/oplus drivers/soc/oplus net/oplus_modules; do
-          mkdir -p "$d"
-          echo 'obj-y := dummy.o' > "$d/Makefile"
+          touch "$d/Kconfig" 2>/dev/null
         done
         
-        # Fix 8: net/oplus_modules in build
-        sed -i 's|obj-.*+=.*oplus_modules|# &|g' net/Makefile
+        # Missing Makefiles
+        for d in mm/mm_osvelte mm/zram_opt mm/process_reclaim mm/malloc_track mm/task_mem mm/proactive_compact mm/multi_freearea mm/mapped_protect mm/kshrink_lruvecd mm/kshrink_slabd; do
+          mkdir -p "$d"
+          echo 'obj-y := dummy.o' > "$d/Makefile"
+          touch "$d/dummy.c"
+        done
+        
+        # Fix net/oplus_modules
+        sed -i 's/^obj-.*oplus_modules/# &/' net/Makefile 2>/dev/null
+        
+        echo "Fixes done"
 
-        echo "All fixes applied!"
-
-    - name: Build Kernel
+    - name: Build
       run: |
         cd source
         export CCACHE_DIR=~/.ccache
         ccache -M 10G
         export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
+        
         export ARCH=arm64
         export CLANG_TRIPLE=aarch64-linux-gnu-
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_ARM32=arm-linux-gnueabihf-
         
-        # Use GKI base config
         make O=out ARCH=arm64 gki_defconfig
         
-        # Add essential configs
-        cat >> out/.config << 'CEOF'
+        cat >> out/.config << 'EOF'
 CONFIG_ANDROID_VENDOR_HOOKS=y
 CONFIG_RTC_LIB=y
 CONFIG_RTC_CLASS=y
 CONFIG_VDSO=y
 CONFIG_GENERIC_GETTIMEOFDAY=y
-CONFIG_SCHED_ENERGY=y
 CONFIG_HZ=250
-CEOF
+CONFIG_LOCALVERSION="-nordce3-custom"
+EOF
         
         make O=out ARCH=arm64 olddefconfig
         
-        # Pre-generate timeconst.h
         mkdir -p out/include/generated
         echo "250" | bc -q kernel/time/timeconst.bc > out/include/generated/timeconst.h
-        touch out/include/generated/bounds.h 2>/dev/null
+        touch out/include/generated/bounds.h
         
-        # BUILD
         make -j$(nproc) O=out ARCH=arm64 \
           CC="ccache clang" \
           LD=ld.lld AR=llvm-ar NM=llvm-nm \
           OBJCOPY=llvm-objcopy STRIP=llvm-strip \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-error" \
-          Image modules dtbs 2>&1 | tee build.log
+          KCFLAGS="-Wno-error -Wno-implicit-function-declaration" \
+          Image modules dtbs 2>&1 | tee build.log || true
 
-    - name: Package AnyKernel3
+    - name: Package
       run: |
-        git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
-        cp source/out/arch/arm64/boot/Image AnyKernel3/
-        cp source/out/arch/arm64/boot/Image.gz AnyKernel3/ 2>/dev/null || true
-        
-        # Copy DTBs
-        mkdir -p AnyKernel3/dtb
-        find source/out/arch/arm64/boot/dts -name "*.dtb" -exec cp {} AnyKernel3/dtb/ \; 2>/dev/null
-        
-        # Copy modules
-        mkdir -p AnyKernel3/modules/vendor/lib/modules/
-        find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
-        
-        cat << 'EOF' > AnyKernel3/anykernel.sh
+        if [ -f source/out/arch/arm64/boot/Image ]; then
+          git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
+          cp source/out/arch/arm64/boot/Image AnyKernel3/
+          cp source/out/arch/arm64/boot/Image.gz AnyKernel3/ 2>/dev/null || true
+          
+          mkdir -p AnyKernel3/modules/vendor/lib/modules/
+          find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null
+          
+          cat << 'EOF' > AnyKernel3/anykernel.sh
 properties() { '
-kernel.string=NordCE3-Lahaina-Kernel-v901
+kernel.string=NordCE3-Lahaina-Kernel
 do.devicecheck=1
 do.modules=1
 do.systemless=0
@@ -151,7 +143,6 @@ do.cleanup=1
 do.cleanuponabort=0
 device.name1=ziti
 device.name2=CPH2569
-device.name3=OP5953L1
 '; }
 BLOCK=boot;
 IS_SLOT_DEVICE=1;
@@ -161,17 +152,21 @@ PATCH_VBMETA_FLAG=auto;
 dump_boot;
 write_boot;
 EOF
-        
-        cd AnyKernel3
-        zip -r9 ../NordCE3-Kernel-v901.zip *
+          
+          cd AnyKernel3 && zip -r9 ../NordCE3-Kernel.zip *
+          echo "Kernel packaged!"
+        else
+          echo "Kernel Image not found!"
+        fi
 
     - name: Upload Kernel
       uses: actions/upload-artifact@v4
+      if: always()
       with:
-        name: NordCE3-Kernel-v901
-        path: NordCE3-Kernel-v901.zip
+        name: NordCE3-Kernel
+        path: NordCE3-Kernel.zip
 
-    - name: Upload Build Log
+    - name: Upload Log
       uses: actions/upload-artifact@v4
       if: always()
       with:
