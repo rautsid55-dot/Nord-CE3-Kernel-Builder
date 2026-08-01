@@ -52,15 +52,13 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_ARM32=arm-linux-gnueabihf-
         make O=out ARCH=arm64 gki_defconfig
-        cat >> out/.config << 'EOF'
-CONFIG_ANDROID_VENDOR_HOOKS=y
-CONFIG_RTC_LIB=y
-CONFIG_RTC_CLASS=y
-CONFIG_VDSO=y
-CONFIG_GENERIC_GETTIMEOFDAY=y
-CONFIG_HZ=250
-CONFIG_LOCALVERSION="-nordce3"
-EOF
+        echo "CONFIG_ANDROID_VENDOR_HOOKS=y" >> out/.config
+        echo "CONFIG_RTC_LIB=y" >> out/.config
+        echo "CONFIG_RTC_CLASS=y" >> out/.config
+        echo "CONFIG_VDSO=y" >> out/.config
+        echo "CONFIG_GENERIC_GETTIMEOFDAY=y" >> out/.config
+        echo "CONFIG_HZ=250" >> out/.config
+        echo 'CONFIG_LOCALVERSION="-nordce3"' >> out/.config
         make O=out ARCH=arm64 olddefconfig
         mkdir -p out/include/generated
         echo "250" | bc -q kernel/time/timeconst.bc > out/include/generated/timeconst.h
@@ -72,28 +70,25 @@ EOF
         if [ -f source/out/arch/arm64/boot/Image ]; then
           git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
           cp source/out/arch/arm64/boot/Image AnyKernel3/
-          cp source/out/arch/arm64/boot/Image.gz AnyKernel3/ 2>/dev/null || true
           mkdir -p AnyKernel3/modules/vendor/lib/modules/
           find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          cat << 'EOF' > AnyKernel3/anykernel.sh
-properties() { '
-kernel.string=NordCE3-Kernel
-do.devicecheck=1
-do.modules=1
-do.systemless=0
-do.cleanup=1
-do.cleanuponabort=0
-device.name1=ziti
-device.name2=CPH2569
-'; }
-BLOCK=boot;
-IS_SLOT_DEVICE=1;
-RAMDISK_COMPRESSION=auto;
-PATCH_VBMETA_FLAG=auto;
-. tools/ak3-core.sh;
-dump_boot;
-write_boot;
-EOF
+          printf 'properties() { '\''\n' > AnyKernel3/anykernel.sh
+          printf 'kernel.string=NordCE3-Kernel\n' >> AnyKernel3/anykernel.sh
+          printf 'do.devicecheck=1\n' >> AnyKernel3/anykernel.sh
+          printf 'do.modules=1\n' >> AnyKernel3/anykernel.sh
+          printf 'do.systemless=0\n' >> AnyKernel3/anykernel.sh
+          printf 'do.cleanup=1\n' >> AnyKernel3/anykernel.sh
+          printf 'do.cleanuponabort=0\n' >> AnyKernel3/anykernel.sh
+          printf 'device.name1=ziti\n' >> AnyKernel3/anykernel.sh
+          printf 'device.name2=CPH2569\n' >> AnyKernel3/anykernel.sh
+          printf '; }\n' >> AnyKernel3/anykernel.sh
+          printf 'BLOCK=boot;\n' >> AnyKernel3/anykernel.sh
+          printf 'IS_SLOT_DEVICE=1;\n' >> AnyKernel3/anykernel.sh
+          printf 'RAMDISK_COMPRESSION=auto;\n' >> AnyKernel3/anykernel.sh
+          printf 'PATCH_VBMETA_FLAG=auto;\n' >> AnyKernel3/anykernel.sh
+          printf '. tools/ak3-core.sh;\n' >> AnyKernel3/anykernel.sh
+          printf 'dump_boot;\n' >> AnyKernel3/anykernel.sh
+          printf 'write_boot;\n' >> AnyKernel3/anykernel.sh
           cd AnyKernel3 && zip -r9 ../NordCE3-Kernel.zip *
           echo "Kernel packaged!"
         else
