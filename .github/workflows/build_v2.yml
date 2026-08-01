@@ -31,35 +31,14 @@ jobs:
     - name: Apply Fixes
       run: |
         cd source
-        
-        python3 << 'PYEOF'
-with open('include/linux/types.h','r') as f: c=f.read()
-old='#ifdef CONFIG_64BIT\ntypedef struct {\n        s64 counter;\n} atomic64_t;\n#endif'
-new='#ifdef CONFIG_64BIT\ntypedef struct {\n        s64 counter;\n} atomic64_t;\n#else\ntypedef struct { s64 counter; } atomic64_t;\n#endif'
-if old in c: open('include/linux/types.h','w').write(c.replace(old,new))
-print("types.h done")
-PYEOF
-
+        python3 -c "f=open('include/linux/types.h');c=f.read();f.close();old='#ifdef CONFIG_64BIT\ntypedef struct {\n        s64 counter;\n} atomic64_t;\n#endif';new='#ifdef CONFIG_64BIT\ntypedef struct {\n        s64 counter;\n} atomic64_t;\n#else\ntypedef struct { s64 counter; } atomic64_t;\n#endif';exec(open('include/linux/types.h','w').write(c.replace(old,new)) if old in c else None);print('types.h done')"
         echo '#!/bin/sh' > scripts/atomic/check-atomics.sh
         echo 'exit 0' >> scripts/atomic/check-atomics.sh
-        
         sed -i 's/¦/ /g' include/linux/memcontrol.h 2>/dev/null || true
         sed -i 's/sched_energy_present/sched_energy_enabled/g' kernel/sched/fair.c 2>/dev/null || true
-        
         echo '#define trace_android_vh_check_dhcp_pkt(sk, skb, dev, pt, do_drop) do {} while(0)' | cat - net/packet/af_packet.c > /tmp/af_packet.c && mv /tmp/af_packet.c net/packet/af_packet.c
-        
-        for d in kernel/uad kernel/sched_assist kernel/tuning kernel/special_opt arch/arm64/kernel/secureguard block/healthinfo mm/healthinfo mm/zram_opt mm/process_reclaim; do
-          rm -rf "$d" 2>/dev/null || true
-          mkdir -p "$d"
-          touch "$d/Kconfig"
-        done
-        
-        for d in mm/mm_osvelte mm/zram_opt mm/process_reclaim mm/malloc_track mm/task_mem mm/proactive_compact mm/multi_freearea mm/mapped_protect mm/kshrink_lruvecd mm/kshrink_slabd drivers/power/oplus drivers/soc/oplus; do
-          mkdir -p "$d"
-          echo 'obj-y := dummy.o' > "$d/Makefile"
-          touch "$d/dummy.c"
-        done
-        
+        for d in kernel/uad kernel/sched_assist kernel/tuning kernel/special_opt arch/arm64/kernel/secureguard block/healthinfo mm/healthinfo mm/zram_opt mm/process_reclaim; do rm -rf "$d" 2>/dev/null || true; mkdir -p "$d"; touch "$d/Kconfig"; done
+        for d in mm/mm_osvelte mm/zram_opt mm/process_reclaim mm/malloc_track mm/task_mem mm/proactive_compact mm/multi_freearea mm/mapped_protect mm/kshrink_lruvecd mm/kshrink_slabd drivers/power/oplus drivers/soc/oplus; do mkdir -p "$d"; echo 'obj-y := dummy.o' > "$d/Makefile"; touch "$d/dummy.c"; done
         sed -i 's/^obj-.*oplus_modules/# &/' net/Makefile 2>/dev/null || true
 
     - name: Build Kernel
@@ -72,9 +51,7 @@ PYEOF
         export CLANG_TRIPLE=aarch64-linux-gnu-
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_ARM32=arm-linux-gnueabihf-
-        
         make O=out ARCH=arm64 gki_defconfig
-        
         cat >> out/.config << 'EOF'
 CONFIG_ANDROID_VENDOR_HOOKS=y
 CONFIG_RTC_LIB=y
@@ -84,21 +61,11 @@ CONFIG_GENERIC_GETTIMEOFDAY=y
 CONFIG_HZ=250
 CONFIG_LOCALVERSION="-nordce3"
 EOF
-        
         make O=out ARCH=arm64 olddefconfig
-        
         mkdir -p out/include/generated
         echo "250" | bc -q kernel/time/timeconst.bc > out/include/generated/timeconst.h
         touch out/include/generated/bounds.h
-        
-        make -j$(nproc) O=out ARCH=arm64 \
-          CC="ccache clang" \
-          LD=ld.lld AR=llvm-ar NM=llvm-nm \
-          OBJCOPY=llvm-objcopy STRIP=llvm-strip \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          KCFLAGS="-Wno-error -Wno-implicit-function-declaration" \
-          Image modules dtbs 2>&1 | tee build.log || true
+        make -j$(nproc) O=out ARCH=arm64 CC="ccache clang" LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy STRIP=llvm-strip CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-implicit-function-declaration" Image modules dtbs 2>&1 | tee build.log || true
 
     - name: Package AnyKernel3
       run: |
@@ -106,10 +73,8 @@ EOF
           git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
           cp source/out/arch/arm64/boot/Image AnyKernel3/
           cp source/out/arch/arm64/boot/Image.gz AnyKernel3/ 2>/dev/null || true
-          
           mkdir -p AnyKernel3/modules/vendor/lib/modules/
           find source/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \; 2>/dev/null || true
-          
           cat << 'EOF' > AnyKernel3/anykernel.sh
 properties() { '
 kernel.string=NordCE3-Kernel
@@ -129,7 +94,6 @@ PATCH_VBMETA_FLAG=auto;
 dump_boot;
 write_boot;
 EOF
-          
           cd AnyKernel3 && zip -r9 ../NordCE3-Kernel.zip *
           echo "Kernel packaged!"
         else
